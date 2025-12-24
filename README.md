@@ -78,11 +78,12 @@ everything in dependency order:
 
 ```go
 func main() {
-app, err := InitializeApp()
-if err != nil {
-panic(err)
-}
-app.Server.Start()
+    app, err := InitializeApp()
+    if err != nil {
+        panic(err)
+    }
+	
+    app.Server.Start()
 }
 ```
 
