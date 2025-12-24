@@ -10,14 +10,16 @@ go install github.com/eloonstra/autowire@latest
 
 ## Usage
 
-Run directly or via `go generate`:
+Run directly:
 
 ```bash
 autowire --out ./cmd --scan ./internal --scan ./pkg
 ```
 
+or via `go generate` (for example in `cmd/main.go`):
+
 ```go
-//go:generate go run github.com/eloonstra/autowire --out ./cmd --scan ./internal --scan ./pkg
+//go:generate autowire --scan ../internal --scan ../pkg
 ```
 
 ## Annotations
@@ -31,7 +33,7 @@ func NewDatabase(cfg *Config) (*Database, error) { ... }
 
 //autowire:provide
 type Server struct {
-    Config *Config   // injected (exported fields only)
+Config *Config // injected (exported fields only)
 }
 
 //autowire:invoke
@@ -63,7 +65,8 @@ var _ io.Writer = (*BufferedWriter)(nil) // compile-time check
 func NewBufferedWriter() *BufferedWriter { ... }
 ```
 
-Adding `var _ interfaces.Interface = (*Implementation)(nil)` is recommended. it verifies at compile time that your type implements the interface and prevents "imported and not used" errors.
+Adding `var _ interfaces.Interface = (*Implementation)(nil)` is recommended. it verifies at compile time that your type
+implements the interface and prevents "imported and not used" errors.
 
 - `InterfaceName`: interface in same package
 - `package.InterfaceName`: imported interface (requires import)
@@ -75,27 +78,27 @@ everything in dependency order:
 
 ```go
 func main() {
-    app, err := InitializeApp()
-    if err != nil {
-        panic(err)
-    }
-    app.Server.Start()
+app, err := InitializeApp()
+if err != nil {
+panic(err)
+}
+app.Server.Start()
 }
 ```
 
 ## Comparison
 
-|                    |   autowire    | wire (archived) | do | Fx |
-|--------------------|:-------------:|:---------------:|:--:|:--:|
-| Compile-time safe  |       ✓       |        ✓        | ✓  |    |
-| Code generation    |       ✓       |        ✓        |    |    |
-| No manual wiring   |       ✓       |                 |    |    |
-| Struct injection   |       ✓       |                 |    |    |
-| Zero runtime cost  |       ✓       |        ✓        |    |    |
-| Cycle detection    |       ✓       |        ✓        | ✓  | ✓  |
-| Interface binding  |       ✓       |        ✓        | ✓  | ✓  |
-| Lifecycle hooks    |               |                 | ✓  | ✓  |
-| Named dependencies |     soon™     |        ✓        | ✓  | ✓  |
+|                    | autowire | wire (archived) | do | Fx |
+|--------------------|:--------:|:---------------:|:--:|:--:|
+| Compile-time safe  |    ✓     |        ✓        | ✓  |    |
+| Code generation    |    ✓     |        ✓        |    |    |
+| No manual wiring   |    ✓     |                 |    |    |
+| Struct injection   |    ✓     |                 |    |    |
+| Zero runtime cost  |    ✓     |        ✓        |    |    |
+| Cycle detection    |    ✓     |        ✓        | ✓  | ✓  |
+| Interface binding  |    ✓     |        ✓        | ✓  | ✓  |
+| Lifecycle hooks    |          |                 | ✓  | ✓  |
+| Named dependencies |  soon™   |        ✓        | ✓  | ✓  |
 
 - **[wire](https://github.com/google/wire)**: Google's compile-time DI, requires manual provider sets (archived)
 - **[do](https://github.com/samber/do)**: Lightweight runtime DI container with generics
