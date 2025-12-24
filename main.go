@@ -59,8 +59,15 @@ func run(*cobra.Command, []string) error {
 		fmt.Printf("output dir: %s\n", absOutDir)
 	}
 
+	outputPackage, outputImportPath, err := parser.GetOutputInfo(absOutDir)
+	if err != nil {
+		return fmt.Errorf("getting output info: %w", err)
+	}
+
 	merged := &types.ParseResult{
-		OutputPath: absOutDir,
+		OutputPath:       absOutDir,
+		OutputPackage:    outputPackage,
+		OutputImportPath: outputImportPath,
 	}
 
 	for _, dir := range scanDirs {
@@ -73,18 +80,13 @@ func run(*cobra.Command, []string) error {
 			fmt.Printf("scanning: %s\n", absDir)
 		}
 
-		parsed, err := parser.Parse(absDir, absOutDir)
+		parsed, err := parser.Parse(absDir)
 		if err != nil {
 			return fmt.Errorf("parsing %s: %w", dir, err)
 		}
 
 		merged.Providers = append(merged.Providers, parsed.Providers...)
 		merged.Invocations = append(merged.Invocations, parsed.Invocations...)
-
-		if merged.OutputPackage == "" {
-			merged.OutputPackage = parsed.OutputPackage
-			merged.OutputImportPath = parsed.OutputImportPath
-		}
 	}
 
 	if len(merged.Providers) == 0 && len(merged.Invocations) == 0 {

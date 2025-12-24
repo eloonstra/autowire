@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -25,25 +26,53 @@ type fileContext struct {
 	imports    map[string]string
 }
 
-func Parse(scanDir, outDir string) (*types.ParseResult, error) {
+func GetOutputInfo(outDir string) (packageName, importPath string, err error) {
+	absOutDir, err := filepath.Abs(outDir)
+	if err != nil {
+		return "", "", err
+	}
+
+	importPath, err = getBasePath(absOutDir)
+	if err != nil {
+		return "", "", fmt.Errorf("getting module path: %w", err)
+	}
+
+	entries, err := os.ReadDir(absOutDir)
+	if err != nil {
+		packageName = filepath.Base(absOutDir)
+		return packageName, importPath, nil
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		hasGoSuffix := strings.HasSuffix(name, ".go")
+		isTestFile := strings.HasSuffix(name, "_test.go")
+		isGenFile := strings.HasSuffix(name, "_gen.go")
+		if !hasGoSuffix || isTestFile || isGenFile {
+			continue
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, filepath.Join(absOutDir, name), nil, parser.PackageClauseOnly)
+		if err != nil {
+			continue
+		}
+		return file.Name.Name, importPath, nil
+	}
+
+	packageName = filepath.Base(absOutDir)
+	return packageName, importPath, nil
+}
+
+func Parse(scanDir string) (*types.ParseResult, error) {
 	result := &types.ParseResult{}
 
 	absDir, err := filepath.Abs(scanDir)
 	if err != nil {
 		return nil, err
 	}
-
-	absOutDir, err := filepath.Abs(outDir)
-	if err != nil {
-		return nil, err
-	}
-	result.OutputPath = absOutDir
-
-	outImportPath, err := getBasePath(absOutDir)
-	if err != nil {
-		return nil, fmt.Errorf("getting module path: %w", err)
-	}
-	result.OutputImportPath = outImportPath
 
 	scanBasePath, err := getBasePath(absDir)
 	if err != nil {
@@ -124,10 +153,6 @@ func parseFile(path, importPath string, result *types.ParseResult) error {
 	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
 		return err
-	}
-
-	if filepath.Dir(path) == result.OutputPath && result.OutputPackage == "" {
-		result.OutputPackage = file.Name.Name
 	}
 
 	ctx := &fileContext{
