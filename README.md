@@ -13,11 +13,11 @@ go install github.com/eloonstra/autowire@latest
 Run directly or via `go generate`:
 
 ```bash
-autowire --scan ./... --out ./cmd
+autowire --out ./cmd
 ```
 
 ```go
-//go:generate go run github.com/eloonstra/autowire --scan ./... --out ./cmd
+//go:generate go run github.com/eloonstra/autowire --out ./cmd
 ```
 
 ## Annotations
