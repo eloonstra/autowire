@@ -2,7 +2,6 @@ package analyzer
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -17,7 +16,7 @@ type Result struct {
 	Imports          map[string]string
 }
 
-func Analyze(parsed *types.ParseResult) (*Result, error) {
+func Analyze(parsed *types.ParseResult, resolver types.PackageNameResolver) (*Result, error) {
 	byType := make(map[string]types.Provider)
 	for _, p := range parsed.Providers {
 		key := p.ProvidedType.Key()
@@ -43,7 +42,7 @@ func Analyze(parsed *types.ParseResult) (*Result, error) {
 		Invocations:      parsed.Invocations,
 		PackageName:      parsed.OutputPackage,
 		OutputImportPath: parsed.OutputImportPath,
-		Imports:          collectImports(ordered, parsed.Invocations, parsed.OutputImportPath),
+		Imports:          collectImports(ordered, parsed.Invocations, parsed.OutputImportPath, resolver),
 	}, nil
 }
 
@@ -138,7 +137,7 @@ func topoSort(providers []types.Provider, invocations []types.Invocation, byType
 	return result, nil
 }
 
-func collectImports(providers []types.Provider, invocations []types.Invocation, outputPath string) map[string]string {
+func collectImports(providers []types.Provider, invocations []types.Invocation, outputPath string, resolver types.PackageNameResolver) map[string]string {
 	paths := make(map[string]struct{})
 
 	add := func(path string) {
@@ -162,10 +161,10 @@ func collectImports(providers []types.Provider, invocations []types.Invocation, 
 		}
 	}
 
-	return resolveImportAliases(paths)
+	return resolveImportAliases(paths, resolver)
 }
 
-func resolveImportAliases(paths map[string]struct{}) map[string]string {
+func resolveImportAliases(paths map[string]struct{}, resolver types.PackageNameResolver) map[string]string {
 	imports := make(map[string]string)
 	baseCount := make(map[string]int)
 
@@ -176,7 +175,7 @@ func resolveImportAliases(paths map[string]struct{}) map[string]string {
 	sort.Strings(sortedPaths)
 
 	for _, path := range sortedPaths {
-		base := filepath.Base(path)
+		base := resolver.ResolveName(path)
 		count := baseCount[base]
 		baseCount[base] = count + 1
 

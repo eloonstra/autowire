@@ -6,12 +6,33 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/eloonstra/autowire/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type mockResolver struct{}
+
+func (m *mockResolver) ResolveName(importPath string) string {
+	return filepath.Base(importPath)
+}
+
+type versionedPathResolver struct{}
+
+func (v *versionedPathResolver) ResolveName(importPath string) string {
+	knownPackages := map[string]string{
+		"github.com/go-chi/chi/v5": "chi",
+		"github.com/go-chi/chi/v4": "chi",
+		"gopkg.in/yaml.v3":         "yaml",
+	}
+	if name, ok := knownPackages[importPath]; ok {
+		return name
+	}
+	return filepath.Base(importPath)
+}
 
 type mockDirEntry struct {
 	name  string
@@ -309,7 +330,57 @@ import (
 			file, err := parser.ParseFile(fset, "", tt.src, parser.ImportsOnly)
 			require.NoError(t, err)
 
-			got := buildImportMap(file)
+			got := buildImportMap(file, &mockResolver{})
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestBuildImportMap_VersionedPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		src      string
+		expected map[string]string
+	}{
+		{
+			name: "chi v5 versioned import",
+			src: `package test
+import "github.com/go-chi/chi/v5"`,
+			expected: map[string]string{"chi": "github.com/go-chi/chi/v5"},
+		},
+		{
+			name: "chi v5 with alias overrides resolver",
+			src: `package test
+import router "github.com/go-chi/chi/v5"`,
+			expected: map[string]string{"router": "github.com/go-chi/chi/v5"},
+		},
+		{
+			name: "yaml v3 versioned import",
+			src: `package test
+import "gopkg.in/yaml.v3"`,
+			expected: map[string]string{"yaml": "gopkg.in/yaml.v3"},
+		},
+		{
+			name: "multiple versioned imports",
+			src: `package test
+import (
+	"github.com/go-chi/chi/v5"
+	"gopkg.in/yaml.v3"
+)`,
+			expected: map[string]string{
+				"chi":  "github.com/go-chi/chi/v5",
+				"yaml": "gopkg.in/yaml.v3",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "", tt.src, parser.ImportsOnly)
+			require.NoError(t, err)
+
+			got := buildImportMap(file, &versionedPathResolver{})
 			assert.Equal(t, tt.expected, got)
 		})
 	}
@@ -409,7 +480,7 @@ var x unknown.Foo`,
 
 			ctx := &fileContext{
 				importPath: testImportPath,
-				imports:    buildImportMap(file),
+				imports:    buildImportMap(file, &mockResolver{}),
 			}
 
 			var varType ast.Expr
@@ -497,7 +568,7 @@ func foo(*Config) {}`,
 
 			ctx := &fileContext{
 				importPath: testImportPath,
-				imports:    buildImportMap(file),
+				imports:    buildImportMap(file, &mockResolver{}),
 			}
 
 			var params *ast.FieldList
@@ -582,7 +653,7 @@ type StructEmbedded struct {
 
 			ctx := &fileContext{
 				importPath: testImportPath,
-				imports:    buildImportMap(file),
+				imports:    buildImportMap(file, &mockResolver{}),
 			}
 
 			var st *ast.StructType
@@ -684,7 +755,7 @@ type FileReader struct{}`,
 
 			ctx := &fileContext{
 				importPath: testImportPath,
-				imports:    buildImportMap(file),
+				imports:    buildImportMap(file, &mockResolver{}),
 			}
 
 			var st *ast.StructType
@@ -782,7 +853,7 @@ func WrongSecond() (*Config, string) { return nil, "" }`,
 
 			ctx := &fileContext{
 				importPath: testImportPath,
-				imports:    buildImportMap(file),
+				imports:    buildImportMap(file, &mockResolver{}),
 			}
 
 			var fn *ast.FuncDecl
@@ -891,7 +962,7 @@ func NewReader() *FileReader { return nil }`,
 
 			ctx := &fileContext{
 				importPath: testImportPath,
-				imports:    buildImportMap(file),
+				imports:    buildImportMap(file, &mockResolver{}),
 			}
 
 			var fn *ast.FuncDecl
@@ -1054,7 +1125,7 @@ func SetupReturnsValue() int { return 0 }`,
 
 			ctx := &fileContext{
 				importPath: testImportPath,
-				imports:    buildImportMap(file),
+				imports:    buildImportMap(file, &mockResolver{}),
 			}
 
 			var fn *ast.FuncDecl
@@ -1094,7 +1165,7 @@ type Config struct{}
 	tmpFile.Close()
 
 	result := &types.ParseResult{}
-	err = parseFile(tmpFile.Name(), "example.com/test", result)
+	err = parseFile(tmpFile.Name(), "example.com/test", &mockResolver{}, result)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot have both provide and invoke")

@@ -1,12 +1,32 @@
 package analyzer
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/eloonstra/autowire/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type mockResolver struct{}
+
+func (m *mockResolver) ResolveName(importPath string) string {
+	return filepath.Base(importPath)
+}
+
+type versionedPathResolver struct{}
+
+func (v *versionedPathResolver) ResolveName(importPath string) string {
+	knownPackages := map[string]string{
+		"github.com/go-chi/chi/v5": "chi",
+		"gopkg.in/yaml.v3":         "yaml",
+	}
+	if name, ok := knownPackages[importPath]; ok {
+		return name
+	}
+	return filepath.Base(importPath)
+}
 
 func TestAnalyze_DuplicateProvider(t *testing.T) {
 	parsed := &types.ParseResult{
@@ -30,7 +50,7 @@ func TestAnalyze_DuplicateProvider(t *testing.T) {
 		OutputImportPath: "example.com/app",
 	}
 
-	_, err := Analyze(parsed)
+	_, err := Analyze(parsed, &mockResolver{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate provider")
 }
@@ -60,7 +80,7 @@ func TestAnalyze_Success(t *testing.T) {
 		OutputImportPath: "example.com/app",
 	}
 
-	result, err := Analyze(parsed)
+	result, err := Analyze(parsed, &mockResolver{})
 	require.NoError(t, err)
 	assert.Equal(t, "main", result.PackageName)
 	assert.Len(t, result.Providers, 2)
@@ -517,7 +537,7 @@ func TestCollectImports(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := collectImports(tt.providers, tt.invocations, outputPath)
+			result := collectImports(tt.providers, tt.invocations, outputPath, &mockResolver{})
 
 			for _, path := range tt.expectPaths {
 				_, exists := result[path]
@@ -567,7 +587,43 @@ func TestResolveImportAliases(t *testing.T) {
 				pathSet[p] = struct{}{}
 			}
 
-			result := resolveImportAliases(pathSet)
+			result := resolveImportAliases(pathSet, &mockResolver{})
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestResolveImportAliases_VersionedPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		paths    []string
+		expected map[string]string
+	}{
+		{
+			name:     "chi v5 resolves to chi",
+			paths:    []string{"github.com/go-chi/chi/v5"},
+			expected: map[string]string{"github.com/go-chi/chi/v5": ""},
+		},
+		{
+			name:     "yaml v3 resolves to yaml",
+			paths:    []string{"gopkg.in/yaml.v3"},
+			expected: map[string]string{"gopkg.in/yaml.v3": ""},
+		},
+		{
+			name:     "multiple versioned paths with same resolved name get aliased",
+			paths:    []string{"github.com/go-chi/chi/v5", "github.com/other/chi"},
+			expected: map[string]string{"github.com/go-chi/chi/v5": "", "github.com/other/chi": "chi1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pathSet := make(map[string]struct{})
+			for _, p := range tt.paths {
+				pathSet[p] = struct{}{}
+			}
+
+			result := resolveImportAliases(pathSet, &versionedPathResolver{})
 			assert.Equal(t, tt.expected, result)
 		})
 	}

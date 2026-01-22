@@ -1,5 +1,10 @@
 # autowire
 
+[![CI](https://github.com/eloonstra/autowire/actions/workflows/ci.yml/badge.svg)](https://github.com/eloonstra/autowire/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/eloonstra/autowire.svg)](https://pkg.go.dev/github.com/eloonstra/autowire)
+[![Go Report Card](https://goreportcard.com/badge/github.com/eloonstra/autowire)](https://goreportcard.com/report/github.com/eloonstra/autowire)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Compile-time dependency injection for Go using annotations.
 
 ## Installation
@@ -33,7 +38,7 @@ func NewDatabase(cfg *Config) (*Database, error) { ... }
 
 //autowire:provide
 type Server struct {
-Config *Config // injected (exported fields only)
+    Config *Config // injected (exported fields only)
 }
 
 //autowire:invoke

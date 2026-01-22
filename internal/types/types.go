@@ -1,5 +1,9 @@
 package types
 
+type PackageNameResolver interface {
+	ResolveName(importPath string) string
+}
+
 type ProviderKind int
 
 const (

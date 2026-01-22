@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"go/parser"
 	"go/token"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,6 +13,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type mockResolver struct{}
+
+func (m *mockResolver) ResolveName(importPath string) string {
+	return filepath.Base(importPath)
+}
+
+type versionedPathResolver struct{}
+
+func (v *versionedPathResolver) ResolveName(importPath string) string {
+	knownPackages := map[string]string{
+		"github.com/go-chi/chi/v5": "chi",
+		"gopkg.in/yaml.v3":         "yaml",
+	}
+	if name, ok := knownPackages[importPath]; ok {
+		return name
+	}
+	return filepath.Base(importPath)
+}
 
 func TestToUpper(t *testing.T) {
 	tests := []struct {
@@ -64,7 +84,42 @@ func TestPkgName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := pkgName(tt.importPath, tt.imports)
+			got := pkgName(tt.importPath, tt.imports, &mockResolver{})
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestPkgName_VersionedPaths(t *testing.T) {
+	tests := []struct {
+		name       string
+		importPath string
+		imports    map[string]string
+		expected   string
+	}{
+		{
+			name:       "chi v5 without alias resolves to chi",
+			importPath: "github.com/go-chi/chi/v5",
+			imports:    map[string]string{"github.com/go-chi/chi/v5": ""},
+			expected:   "chi",
+		},
+		{
+			name:       "chi v5 with alias uses alias",
+			importPath: "github.com/go-chi/chi/v5",
+			imports:    map[string]string{"github.com/go-chi/chi/v5": "router"},
+			expected:   "router",
+		},
+		{
+			name:       "yaml v3 without alias resolves to yaml",
+			importPath: "gopkg.in/yaml.v3",
+			imports:    map[string]string{"gopkg.in/yaml.v3": ""},
+			expected:   "yaml",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := pkgName(tt.importPath, tt.imports, &versionedPathResolver{})
 			assert.Equal(t, tt.expected, got)
 		})
 	}
@@ -119,7 +174,7 @@ func TestFormatType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatType(tt.typeRef, outPath, tt.imports)
+			got := formatType(tt.typeRef, outPath, tt.imports, &mockResolver{})
 			assert.Equal(t, tt.expected, got)
 		})
 	}
@@ -160,7 +215,7 @@ func TestQualifiedName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := qualifiedName(tt.funcName, tt.importPath, outPath, tt.imports)
+			got := qualifiedName(tt.funcName, tt.importPath, outPath, tt.imports, &mockResolver{})
 			assert.Equal(t, tt.expected, got)
 		})
 	}
@@ -276,7 +331,7 @@ func TestWriteAppStruct(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	writeAppStruct(&buf, providers, outPath, imports)
+	writeAppStruct(&buf, providers, outPath, imports, &mockResolver{})
 	result := buf.String()
 
 	assert.Contains(t, result, "type App struct {")
@@ -320,7 +375,7 @@ func TestWriteStructInit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			localImports := map[string]string{"pkg/config": "", "pkg/service": ""}
 			var buf bytes.Buffer
-			writeStructInit(&buf, tt.provider, tt.vars, outPath, localImports)
+			writeStructInit(&buf, tt.provider, tt.vars, outPath, localImports, &mockResolver{})
 			result := buf.String()
 
 			for _, c := range tt.contains {
@@ -374,7 +429,7 @@ func TestWriteFuncInit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			localImports := map[string]string{"pkg/config": "", "pkg/db": ""}
 			var buf bytes.Buffer
-			writeFuncInit(&buf, tt.provider, tt.vars, outPath, localImports)
+			writeFuncInit(&buf, tt.provider, tt.vars, outPath, localImports, &mockResolver{})
 			result := buf.String()
 
 			for _, c := range tt.contains {
@@ -427,7 +482,7 @@ func TestWriteInvocation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			writeInvocation(&buf, tt.invocation, tt.vars, outPath, imports)
+			writeInvocation(&buf, tt.invocation, tt.vars, outPath, imports, &mockResolver{})
 			result := buf.String()
 
 			for _, c := range tt.contains {
@@ -449,7 +504,7 @@ func TestGenerate_EmptyResult(t *testing.T) {
 		Imports:          map[string]string{},
 	}
 
-	output, err := Generate(result)
+	output, err := Generate(result, &mockResolver{})
 	require.NoError(t, err)
 
 	outputStr := string(output)
@@ -519,7 +574,7 @@ func TestGenerate_SingleProvider(t *testing.T) {
 				Imports:          tt.imports,
 			}
 
-			output, err := Generate(result)
+			output, err := Generate(result, &mockResolver{})
 			require.NoError(t, err)
 
 			outputStr := string(output)
@@ -560,7 +615,7 @@ func TestGenerate_WithInvocations(t *testing.T) {
 		Imports:          map[string]string{"pkg/config": "", "pkg/setup": ""},
 	}
 
-	output, err := Generate(result)
+	output, err := Generate(result, &mockResolver{})
 	require.NoError(t, err)
 
 	outputStr := string(output)
@@ -625,7 +680,7 @@ func TestGenerate_FullOutput(t *testing.T) {
 		},
 	}
 
-	output, err := Generate(result)
+	output, err := Generate(result, &mockResolver{})
 	require.NoError(t, err)
 
 	outputStr := string(output)

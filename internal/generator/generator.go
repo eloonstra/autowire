@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"go/format"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -12,7 +11,7 @@ import (
 	"github.com/eloonstra/autowire/internal/types"
 )
 
-func Generate(r *analyzer.Result) ([]byte, error) {
+func Generate(r *analyzer.Result, resolver types.PackageNameResolver) ([]byte, error) {
 	var buf bytes.Buffer
 	out := r.OutputImportPath
 	imports := r.Imports
@@ -21,9 +20,9 @@ func Generate(r *analyzer.Result) ([]byte, error) {
 	buf.WriteString(fmt.Sprintf("package %s\n\n", r.PackageName))
 
 	writeImports(&buf, imports)
-	writeAppStruct(&buf, r.Providers, out, imports)
+	writeAppStruct(&buf, r.Providers, out, imports, resolver)
 	buf.WriteString("\n")
-	writeInitFunc(&buf, r, out, imports)
+	writeInitFunc(&buf, r, out, imports, resolver)
 
 	return format.Source(buf.Bytes())
 }
@@ -51,15 +50,15 @@ func writeImports(buf *bytes.Buffer, imports map[string]string) {
 	buf.WriteString(")\n\n")
 }
 
-func writeAppStruct(buf *bytes.Buffer, providers []types.Provider, out string, imports map[string]string) {
+func writeAppStruct(buf *bytes.Buffer, providers []types.Provider, out string, imports map[string]string, resolver types.PackageNameResolver) {
 	buf.WriteString("type App struct {\n")
 	for _, p := range providers {
-		buf.WriteString(fmt.Sprintf("\t%s %s\n", toUpper(p.VarName), formatType(p.ProvidedType, out, imports)))
+		buf.WriteString(fmt.Sprintf("\t%s %s\n", toUpper(p.VarName), formatType(p.ProvidedType, out, imports, resolver)))
 	}
 	buf.WriteString("}\n")
 }
 
-func writeInitFunc(buf *bytes.Buffer, r *analyzer.Result, out string, imports map[string]string) {
+func writeInitFunc(buf *bytes.Buffer, r *analyzer.Result, out string, imports map[string]string, resolver types.PackageNameResolver) {
 	buf.WriteString("func InitializeApp() (*App, error) {\n")
 
 	vars := make(map[string]string)
@@ -67,7 +66,7 @@ func writeInitFunc(buf *bytes.Buffer, r *analyzer.Result, out string, imports ma
 	if len(r.Providers) > 0 {
 		buf.WriteString("\t// provide\n")
 		for _, p := range r.Providers {
-			writeProvider(buf, p, vars, out, imports)
+			writeProvider(buf, p, vars, out, imports, resolver)
 			vars[p.ProvidedType.Key()] = p.VarName
 		}
 	}
@@ -75,7 +74,7 @@ func writeInitFunc(buf *bytes.Buffer, r *analyzer.Result, out string, imports ma
 	if len(r.Invocations) > 0 {
 		buf.WriteString("\n\t// invoke\n")
 		for _, inv := range r.Invocations {
-			writeInvocation(buf, inv, vars, out, imports)
+			writeInvocation(buf, inv, vars, out, imports, resolver)
 		}
 	}
 
@@ -87,17 +86,17 @@ func writeInitFunc(buf *bytes.Buffer, r *analyzer.Result, out string, imports ma
 	buf.WriteString("}\n")
 }
 
-func writeProvider(buf *bytes.Buffer, p types.Provider, vars map[string]string, out string, imports map[string]string) {
+func writeProvider(buf *bytes.Buffer, p types.Provider, vars map[string]string, out string, imports map[string]string, resolver types.PackageNameResolver) {
 	switch p.Kind {
 	case types.ProviderKindStruct:
-		writeStructInit(buf, p, vars, out, imports)
+		writeStructInit(buf, p, vars, out, imports, resolver)
 	case types.ProviderKindFunc:
-		writeFuncInit(buf, p, vars, out, imports)
+		writeFuncInit(buf, p, vars, out, imports, resolver)
 	}
 }
 
-func writeStructInit(buf *bytes.Buffer, p types.Provider, vars map[string]string, out string, imports map[string]string) {
-	typeName := formatType(p.ProvidedType, out, imports)
+func writeStructInit(buf *bytes.Buffer, p types.Provider, vars map[string]string, out string, imports map[string]string, resolver types.PackageNameResolver) {
+	typeName := formatType(p.ProvidedType, out, imports, resolver)
 	typeName = strings.TrimPrefix(typeName, "*")
 
 	if len(p.Dependencies) == 0 {
@@ -112,9 +111,9 @@ func writeStructInit(buf *bytes.Buffer, p types.Provider, vars map[string]string
 	buf.WriteString("\t}\n")
 }
 
-func writeFuncInit(buf *bytes.Buffer, p types.Provider, vars map[string]string, out string, imports map[string]string) {
+func writeFuncInit(buf *bytes.Buffer, p types.Provider, vars map[string]string, out string, imports map[string]string, resolver types.PackageNameResolver) {
 	args := makeArgs(p.Dependencies, vars)
-	fn := qualifiedName(p.Name, p.ImportPath, out, imports)
+	fn := qualifiedName(p.Name, p.ImportPath, out, imports, resolver)
 
 	if p.CanError {
 		buf.WriteString(fmt.Sprintf("\t%s, err := %s(%s)\n", p.VarName, fn, args))
@@ -124,12 +123,12 @@ func writeFuncInit(buf *bytes.Buffer, p types.Provider, vars map[string]string, 
 	buf.WriteString(fmt.Sprintf("\t%s := %s(%s)\n", p.VarName, fn, args))
 }
 
-func writeInvocation(buf *bytes.Buffer, inv types.Invocation, vars map[string]string, out string, imports map[string]string) {
+func writeInvocation(buf *bytes.Buffer, inv types.Invocation, vars map[string]string, out string, imports map[string]string, resolver types.PackageNameResolver) {
 	args := make([]string, len(inv.Dependencies))
 	for i, dep := range inv.Dependencies {
 		args[i] = vars[dep.Key()]
 	}
-	fn := qualifiedName(inv.Name, inv.ImportPath, out, imports)
+	fn := qualifiedName(inv.Name, inv.ImportPath, out, imports, resolver)
 	argStr := strings.Join(args, ", ")
 
 	if inv.CanError {
@@ -147,14 +146,14 @@ func makeArgs(deps []types.Dependency, vars map[string]string) string {
 	return strings.Join(args, ", ")
 }
 
-func pkgName(importPath string, imports map[string]string) string {
+func pkgName(importPath string, imports map[string]string, resolver types.PackageNameResolver) string {
 	if alias := imports[importPath]; alias != "" {
 		return alias
 	}
-	return filepath.Base(importPath)
+	return resolver.ResolveName(importPath)
 }
 
-func formatType(t types.TypeRef, out string, imports map[string]string) string {
+func formatType(t types.TypeRef, out string, imports map[string]string, resolver types.PackageNameResolver) string {
 	prefix := ""
 	if t.IsPointer {
 		prefix = "*"
@@ -162,14 +161,14 @@ func formatType(t types.TypeRef, out string, imports map[string]string) string {
 	if t.ImportPath == "" || t.ImportPath == out {
 		return prefix + t.Name
 	}
-	return prefix + pkgName(t.ImportPath, imports) + "." + t.Name
+	return prefix + pkgName(t.ImportPath, imports, resolver) + "." + t.Name
 }
 
-func qualifiedName(name, importPath, out string, imports map[string]string) string {
+func qualifiedName(name, importPath, out string, imports map[string]string, resolver types.PackageNameResolver) string {
 	if importPath == out {
 		return name
 	}
-	return pkgName(importPath, imports) + "." + name
+	return pkgName(importPath, imports, resolver) + "." + name
 }
 
 func toUpper(s string) string {

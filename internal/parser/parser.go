@@ -24,6 +24,7 @@ const (
 type fileContext struct {
 	importPath string
 	imports    map[string]string
+	resolver   types.PackageNameResolver
 }
 
 func GetOutputInfo(outDir string) (packageName, importPath string, err error) {
@@ -66,7 +67,7 @@ func GetOutputInfo(outDir string) (packageName, importPath string, err error) {
 	return packageName, importPath, nil
 }
 
-func Parse(scanDir string) (*types.ParseResult, error) {
+func Parse(scanDir string, resolver types.PackageNameResolver) (*types.ParseResult, error) {
 	result := &types.ParseResult{}
 
 	absDir, err := filepath.Abs(scanDir)
@@ -107,7 +108,7 @@ func Parse(scanDir string) (*types.ParseResult, error) {
 			importPath = scanBasePath + "/" + filepath.ToSlash(rel)
 		}
 
-		return parseFile(path, importPath, result)
+		return parseFile(path, importPath, resolver, result)
 	})
 
 	return result, err
@@ -148,7 +149,7 @@ func shouldSkip(d fs.DirEntry) bool {
 	return false
 }
 
-func parseFile(path, importPath string, result *types.ParseResult) error {
+func parseFile(path, importPath string, resolver types.PackageNameResolver, result *types.ParseResult) error {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
@@ -157,7 +158,8 @@ func parseFile(path, importPath string, result *types.ParseResult) error {
 
 	ctx := &fileContext{
 		importPath: importPath,
-		imports:    buildImportMap(file),
+		imports:    buildImportMap(file, resolver),
+		resolver:   resolver,
 	}
 
 	for _, decl := range file.Decls {
@@ -215,11 +217,11 @@ func parseFile(path, importPath string, result *types.ParseResult) error {
 	return nil
 }
 
-func buildImportMap(file *ast.File) map[string]string {
+func buildImportMap(file *ast.File, resolver types.PackageNameResolver) map[string]string {
 	imports := make(map[string]string)
 	for _, imp := range file.Imports {
 		path := strings.Trim(imp.Path.Value, `"`)
-		name := filepath.Base(path)
+		name := resolver.ResolveName(path)
 		if imp.Name != nil {
 			name = imp.Name.Name
 		}

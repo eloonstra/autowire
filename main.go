@@ -9,6 +9,7 @@ import (
 	"github.com/eloonstra/autowire/internal/analyzer"
 	"github.com/eloonstra/autowire/internal/generator"
 	"github.com/eloonstra/autowire/internal/parser"
+	"github.com/eloonstra/autowire/internal/resolver"
 	"github.com/eloonstra/autowire/internal/types"
 	"github.com/spf13/cobra"
 )
@@ -64,6 +65,8 @@ func run(*cobra.Command, []string) error {
 		return fmt.Errorf("getting output info: %w", err)
 	}
 
+	pkgResolver := resolver.New()
+
 	merged := &types.ParseResult{
 		OutputPath:       absOutDir,
 		OutputPackage:    outputPackage,
@@ -80,7 +83,7 @@ func run(*cobra.Command, []string) error {
 			fmt.Printf("scanning: %s\n", absDir)
 		}
 
-		parsed, err := parser.Parse(absDir)
+		parsed, err := parser.Parse(absDir, pkgResolver)
 		if err != nil {
 			return fmt.Errorf("parsing %s: %w", dir, err)
 		}
@@ -104,7 +107,7 @@ func run(*cobra.Command, []string) error {
 		}
 	}
 
-	result, err := analyzer.Analyze(merged)
+	result, err := analyzer.Analyze(merged, pkgResolver)
 	if err != nil {
 		return fmt.Errorf("analyzing: %w", err)
 	}
@@ -116,7 +119,7 @@ func run(*cobra.Command, []string) error {
 		}
 	}
 
-	code, err := generator.Generate(result)
+	code, err := generator.Generate(result, pkgResolver)
 	if err != nil {
 		return fmt.Errorf("generating: %w", err)
 	}
